@@ -1,4 +1,5 @@
 import os
+import gc
 import sys
 import argparse
 from pathlib import Path
@@ -39,9 +40,13 @@ bwm_df = pd.read_csv(freeze_file, index_col=0)
 if args.datasets == "brain-wide-map":
     n_sub = args.n_sessions
     subjects = np.unique(bwm_df.subject)
+    if n_sub == -1:
+        n_sub = len(subjects) # If n_sub is -1, include all subjects
     selected_subs = np.random.choice(subjects, n_sub, replace=False)
-    by_subject = bwm_df.groupby('subject')
-    include_eids = np.array([bwm_df.eid[by_subject.groups[sub][0]] for sub in selected_subs])
+    include_eids = np.unique(bwm_df[bwm_df.subject.isin(selected_subs)].eid.values)
+    
+    #by_subject = bwm_df.groupby('subject')
+    #include_eids = np.array([bwm_df.eid[by_subject.groups[sub][0]] for sub in selected_subs])
 else:
     with open('data/repro_ephys_release.txt') as file:
         include_eids = [line.rstrip() for line in file]
@@ -64,6 +69,11 @@ for eid_idx, eid in enumerate(include_eids):
     try: 
         print('==========================')
         print(f'Preprocess session {eid}:')
+        save_path = Path(args.base_path)/'cached_ibl_data'
+        data_save_path = save_path / eid
+        if data_save_path.exists():
+            print(f'Session {eid} already cached, skipping.')
+            continue
 
         # Load and preprocess data
         neural_dict, behave_dict, meta_data, trials_data = prepare_data(one, eid, bwm_df, params, n_workers=args.n_workers)
@@ -117,13 +127,13 @@ for eid_idx, eid in enumerate(include_eids):
         print(partitioned_dataset)
 
         # Cache dataset
-        save_path = Path(args.base_path)/'cached_ibl_data'
         if not os.path.exists(save_path):
             os.makedirs(save_path)
         partitioned_dataset.save_to_disk(f'{save_path}/{eid}')
     
         print(f'Cached session {eid}.')
         print(f'Progress: {eid_idx+1} / {len(include_eids)} sessions cached.')
+        gc.collect() # Clear memory after each session
             
     except Exception as e:
         print(f'Skipped session {eid} due to unexpected error: ', e)
